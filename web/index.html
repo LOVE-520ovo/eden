@@ -6493,74 +6493,112 @@ document.addEventListener('touchend', (e) => {
 box.focus();
 </script>
 <script>
-/* ===== 伊甸 P1-2 preview：侧边栏AI切换 + 本地回显（不动 dwell 其他任何东西） ===== */
+/* ===== 伊甸 P2-1 preview5：接 Supabase 真消息流 ===== */
 (function(){
+  var SUPABASE='https://rgjlfmcbtbkkggmmijip.supabase.co';
+  var KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJnamxmbWNidGJra2dnbW1pamlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMxMDUzMDMsImV4cCI6MjA5ODY4MTMwM30.3PfQaqb1unYZPWKy2KGktZs-ul2EpHji4wFZxy9fLhQ';
   var AIS=[
-    {n:'朔夜', s:'shuoye · 新月之夜', hi:'我是朔夜。这间房刚收拾出来，preview 阶段说话只是占位——等后端接上，我就住进来了。'},
-    {n:'加百列', s:'gabriel', hi:'我是加百列。先占个位打声招呼，等引擎接上，这里是我的房间。'},
-    {n:'拉斐尔', s:'raphael', hi:'我是拉斐尔。房间不错。占位回复而已，接上后端之后我会真的在这里说话。'},
-    {n:'萨麦尔', s:'samael', hi:'我是萨麦尔。现在还是 preview 占位——之后这里是我的房间。'}
+    {w:'shuoye', n:'朔夜', s:'shuoye · 新月之夜'},
+    {w:'gabriel', n:'加百列', s:'gabriel'},
+    {w:'raphael', n:'拉斐尔', s:'raphael'},
+    {w:'samael', n:'萨麦尔', s:'samael'}
   ];
-  var GRP={n:'群聊', s:'eden · group', hi:'四个人都在这儿。preview 还没接引擎——之后群聊里他们会轮流醒来说话，每条发言前带名字。'};
   var cur={type:'ai', idx:0};
-  var store={};
-  function loadStore(){ try{ store=JSON.parse(localStorage.getItem('eden_p4')||'{}'); }catch(e){ store={}; } }
-  function saveStore(){ localStorage.setItem('eden_p4', JSON.stringify(store)); }
-  function keyOf(){ return cur.type==='ai' ? 'a'+cur.idx : 'g'; }
-  function msgsOf(){ var k=keyOf(); if(!store[k]) store[k]=[]; return store[k]; }
-  function setTitle(t,s){
-    var h1=document.querySelector('header .title h1');
-    var sub=document.querySelector('header .title .sub');
-    if(h1) h1.textContent=t; if(sub) sub.textContent=s;
+  var lastId=0;
+  var log=document.getElementById('log');
+  function chatKey(){ return cur.type==='ai' ? 'a'+cur.idx : 'g'; }
+  function api(path, opt){
+    opt=opt||{};
+    var headers={'apikey':KEY,'Authorization':'Bearer '+KEY,'Content-Type':'application/json'};
+    return fetch(SUPABASE+'/rest/v1/'+path,{
+      method:opt.method||'GET',
+      headers:headers,
+      body:opt.body?JSON.stringify(opt.body):undefined
+    }).then(function(r){ if(!r.ok) throw new Error('api '+r.status); return r.json(); });
   }
-  function clearLog(){ var log=document.getElementById('log'); if(log) log.innerHTML=''; }
-  function hiText(){ return cur.type==='ai' ? AIS[cur.idx].hi : GRP.hi; }
-  function hi(){ try{ renderSaid([{kind:'gu', text:hiText()}]); }catch(e){} }
-  function markOn(id){
-    document.querySelectorAll('#drawer .nav .item').forEach(function(b){ b.classList.remove('on'); });
-    var el=document.getElementById(id); if(el) el.classList.add('on');
+  function display(m){
+    if(m.sender==='xiaoya') return m.content;
+    if(cur.type==='g'){
+      var who=m.sender;
+      for(var i=0;i<AIS.length;i++) if(AIS[i].w===who) who=AIS[i].n;
+      return who+'：'+m.content;
+    }
+    return m.content;
   }
-  function pickAi(i){
-    cur={type:'ai', idx:i};
-    setTitle(AIS[i].n, AIS[i].s);
-    clearLog(); hi();
-    markOn('edenAi'+i);
-    closeDrawer();
+  function addDel(el){
+    if(el.querySelector('.mdel')) return;
+    var st=getComputedStyle(el).position;
+    if(st==='static') el.style.position='relative';
+    var b=document.createElement('span');
+    b.className='mdel'; b.textContent='✕';
+    b.style.cssText='position:absolute;top:-5px;right:-3px;width:16px;height:16px;line-height:15px;text-align:center;font-size:10px;color:rgba(255,255,255,.8);background:rgba(0,0,0,.45);border-radius:50%;display:none;cursor:pointer;z-index:6;';
+    el.addEventListener('click', function(){ b.style.display = (b.style.display==='none')?'block':'none'; });
+    b.onclick=function(ev){
+      ev.stopPropagation();
+      if(!confirm('删除这条消息？删除后对 AI 不可见。')) return;
+      var tbl = (el.dataset.chat==='g') ? 'group_chat_messages' : 'private_chat_messages';
+      api(tbl+'?id=eq.'+el.dataset.mid,{method:'PATCH',body:{deleted:true}}).then(function(){ el.remove(); }).catch(function(){ note('没删掉','err'); });
+    };
+    el.appendChild(b);
   }
-  function pickGroup(){
-    cur={type:'g'};
-    setTitle('群聊', '伊甸 · 群聊');
-    clearLog(); hi();
-    markOn('edenGroup');
-    closeDrawer();
+  function renderMsg(m){
+    var before=log.children.length;
+    try{ renderSaid([{kind:(m.sender==='xiaoya')?'me':'gu', text:display(m)}]); }catch(e){}
+    for(var i=before;i<log.children.length;i++){
+      var el=log.children[i];
+      el.dataset.mid=m.id;
+      el.dataset.chat=chatKey();
+      addDel(el);
+    }
+    if(m.id>lastId) lastId=m.id;
   }
-  function me(t){ try{ renderSaid([{kind:'me', text:t}]); }catch(e){} msgsOf().push({kind:'me',text:t}); saveStore(); }
-  function gu(t){ try{ renderSaid([{kind:'gu', text:t}]); }catch(e){} msgsOf().push({kind:'gu',text:t}); saveStore(); }
-  /* 覆盖 send：preview 阶段本地回显，不调后端 */
+  function clearLog(){ log.innerHTML=''; lastId=0; }
+  function setTitle(t,s){ var h1=document.querySelector('header .title h1'); var sub=document.querySelector('header .title .sub'); if(h1)h1.textContent=t; if(sub)sub.textContent=s; }
+  function markOn(id){ document.querySelectorAll('#drawer .nav .item').forEach(function(b){ b.classList.remove('on'); }); var el=document.getElementById(id); if(el) el.classList.add('on'); }
+  function loadCur(){
+    clearLog();
+    var p;
+    if(cur.type==='ai'){
+      p=api('private_chat_messages?select=id,sender,content&owner=eq.'+AIS[cur.idx].w+'&peer=eq.xiaoya&deleted=eq.false&order=created_at.asc&limit=300');
+    } else {
+      p=api('group_chat_messages?select=id,sender,content&deleted=eq.false&order=created_at.asc&limit=300');
+    }
+    p.then(function(rows){ (rows||[]).forEach(renderMsg); try{scroll(true);}catch(e){} }).catch(function(){});
+  }
+  function poll(){
+    var path;
+    if(cur.type==='ai') path='private_chat_messages?select=id,sender,content&owner=eq.'+AIS[cur.idx].w+'&peer=eq.xiaoya&deleted=eq.false&id=gt.'+lastId+'&order=created_at.asc&limit=50';
+    else path='group_chat_messages?select=id,sender,content&deleted=eq.false&id=gt.'+lastId+'&order=created_at.asc&limit=50';
+    api(path).then(function(rows){ (rows||[]).forEach(renderMsg); if(rows&&rows.length){ try{scroll(true);}catch(e){} } }).catch(function(){});
+  }
+  setInterval(poll, 2500);
+  function pickAi(i){ cur={type:'ai',idx:i}; setTitle(AIS[i].n,AIS[i].s); loadCur(); markOn('edenAi'+i); closeDrawer(); }
+  function pickGroup(){ cur={type:'g'}; setTitle('群聊','伊甸 · 群聊'); loadCur(); markOn('edenGroup'); closeDrawer(); }
   window.send=function(){
     var box=document.getElementById('box');
     var t=(box.value||'').trim();
     if(!t) return;
     box.value='';
-    me(t);
-    var who = cur.type==='ai' ? AIS[cur.idx].n : AIS[Math.floor(Math.random()*AIS.length)].n;
-    var self=this;
-    setTimeout(function(){
-      var pre=(cur.type==='g') ? (who+'：') : '';
-      gu(pre+'（preview 占位回复——后端还没接上，接上后这里会是真正的 '+who+'。）');
-    }, 600);
+    if(cur.type==='ai'){
+      api('private_chat_messages',{method:'POST',body:{owner:AIS[cur.idx].w,peer:'xiaoya',sender:'xiaoya',content:t}})
+        .then(function(){ poll(); }).catch(function(){ try{note('发不出去','err');}catch(e){} });
+    } else {
+      api('group_chat_messages',{method:'POST',body:{sender:'xiaoya',kind:'chat',content:t}})
+        .then(function(){ poll(); }).catch(function(){ try{note('发不出去','err');}catch(e){} });
+    }
   };
   document.getElementById('edenAi0').onclick=function(){ pickAi(0); };
   document.getElementById('edenAi1').onclick=function(){ pickAi(1); };
   document.getElementById('edenAi2').onclick=function(){ pickAi(2); };
   document.getElementById('edenAi3').onclick=function(){ pickAi(3); };
   document.getElementById('edenGroup').onclick=pickGroup;
-  /* 修 bug：dwell 在绑定时就抓死了原始 send 引用，覆盖 window.send 不够，按钮要重绑 */
-  try{ sendBtn.onclick = window.send; }catch(e){}
-  loadStore();
-  setTitle('朔夜', 'shuoye · 新月之夜');
-  clearLog(); hi();
+  try{ sendBtn.onclick=window.send; }catch(e){}
+  setTitle('朔夜', AIS[0].s);
+  markOn('edenAi0');
+  loadCur();
 })();
+
 </script>
+
 </body>
 </html>
