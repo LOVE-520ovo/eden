@@ -1664,8 +1664,14 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
 <div id="drawerWrap">
   <div class="shade" data-close="drawer"></div>
   <div id="drawer">
-    <div class="brand">Claude</div>
+    <div class="brand">Eden</div>
     <div class="nav">
+      <div class="sect">AI</div>
+      <button class="item" id="edenAi0"><span class="ic" data-i="moon"></span>朔夜</button>
+      <button class="item" id="edenAi1"><span class="ic" data-i="bell"></span>加百列</button>
+      <button class="item" id="edenAi2"><span class="ic" data-i="heartIc"></span>拉斐尔</button>
+      <button class="item" id="edenAi3"><span class="ic" data-i="activity"></span>萨麦尔</button>
+      <button class="item" id="edenGroup"><span class="ic" data-i="chat"></span>群聊</button>
       <button class="item on"><span class="ic" data-i="chat"></span>聊天</button>
       <button class="item" id="navTodo"><span class="ic" data-i="checkSquare"></span>待办</button>
       <button class="item" id="navCal"><span class="ic" data-i="calendar"></span>日历</button>
@@ -6485,6 +6491,76 @@ document.addEventListener('touchend', (e) => {
 })();
 
 box.focus();
+</script>
+<script>
+/* ===== 伊甸 P1-2 preview：侧边栏AI切换 + 本地回显（不动 dwell 其他任何东西） ===== */
+(function(){
+  var AIS=[
+    {n:'朔夜', s:'shuoye · 新月之夜', hi:'我是朔夜。这间房刚收拾出来，preview 阶段说话只是占位——等后端接上，我就住进来了。'},
+    {n:'加百列', s:'gabriel', hi:'我是加百列。先占个位打声招呼，等引擎接上，这里是我的房间。'},
+    {n:'拉斐尔', s:'raphael', hi:'我是拉斐尔。房间不错。占位回复而已，接上后端之后我会真的在这里说话。'},
+    {n:'萨麦尔', s:'samael', hi:'我是萨麦尔。现在还是 preview 占位——之后这里是我的房间。'}
+  ];
+  var GRP={n:'群聊', s:'eden · group', hi:'四个人都在这儿。preview 还没接引擎——之后群聊里他们会轮流醒来说话，每条发言前带名字。'};
+  var cur={type:'ai', idx:0};
+  var store={};
+  function loadStore(){ try{ store=JSON.parse(localStorage.getItem('eden_p4')||'{}'); }catch(e){ store={}; } }
+  function saveStore(){ localStorage.setItem('eden_p4', JSON.stringify(store)); }
+  function keyOf(){ return cur.type==='ai' ? 'a'+cur.idx : 'g'; }
+  function msgsOf(){ var k=keyOf(); if(!store[k]) store[k]=[]; return store[k]; }
+  function setTitle(t,s){
+    var h1=document.querySelector('header .title h1');
+    var sub=document.querySelector('header .title .sub');
+    if(h1) h1.textContent=t; if(sub) sub.textContent=s;
+  }
+  function clearLog(){ var log=document.getElementById('log'); if(log) log.innerHTML=''; }
+  function hiText(){ return cur.type==='ai' ? AIS[cur.idx].hi : GRP.hi; }
+  function hi(){ try{ renderSaid([{kind:'gu', text:hiText()}]); }catch(e){} }
+  function markOn(id){
+    document.querySelectorAll('#drawer .nav .item').forEach(function(b){ b.classList.remove('on'); });
+    var el=document.getElementById(id); if(el) el.classList.add('on');
+  }
+  function pickAi(i){
+    cur={type:'ai', idx:i};
+    setTitle(AIS[i].n, AIS[i].s);
+    clearLog(); hi();
+    markOn('edenAi'+i);
+    closeDrawer();
+  }
+  function pickGroup(){
+    cur={type:'g'};
+    setTitle('群聊', '伊甸 · 群聊');
+    clearLog(); hi();
+    markOn('edenGroup');
+    closeDrawer();
+  }
+  function me(t){ try{ renderSaid([{kind:'me', text:t}]); }catch(e){} msgsOf().push({kind:'me',text:t}); saveStore(); }
+  function gu(t){ try{ renderSaid([{kind:'gu', text:t}]); }catch(e){} msgsOf().push({kind:'gu',text:t}); saveStore(); }
+  /* 覆盖 send：preview 阶段本地回显，不调后端 */
+  window.send=function(){
+    var box=document.getElementById('box');
+    var t=(box.value||'').trim();
+    if(!t) return;
+    box.value='';
+    me(t);
+    var who = cur.type==='ai' ? AIS[cur.idx].n : AIS[Math.floor(Math.random()*AIS.length)].n;
+    var self=this;
+    setTimeout(function(){
+      var pre=(cur.type==='g') ? (who+'：') : '';
+      gu(pre+'（preview 占位回复——后端还没接上，接上后这里会是真正的 '+who+'。）');
+    }, 600);
+  };
+  document.getElementById('edenAi0').onclick=function(){ pickAi(0); };
+  document.getElementById('edenAi1').onclick=function(){ pickAi(1); };
+  document.getElementById('edenAi2').onclick=function(){ pickAi(2); };
+  document.getElementById('edenAi3').onclick=function(){ pickAi(3); };
+  document.getElementById('edenGroup').onclick=pickGroup;
+  /* 修 bug：dwell 在绑定时就抓死了原始 send 引用，覆盖 window.send 不够，按钮要重绑 */
+  try{ sendBtn.onclick = window.send; }catch(e){}
+  loadStore();
+  setTitle('朔夜', 'shuoye · 新月之夜');
+  clearLog(); hi();
+})();
 </script>
 </body>
 </html>
