@@ -298,6 +298,8 @@ html[data-theme="dark"] .glass,
     width: 38px; height: 5px; border-radius: 3px; background: var(--line);
     margin: 10px auto 0; flex: none;
   }
+  .trbtn { font-size:12px; padding:2px 8px; border-radius:6px; background:var(--line); color:var(--dim); border:none; cursor:pointer; margin-left:6px; flex:none; }
+  .trbtn:active { opacity:.6; }
   .thinkbody {
     font-size: 15.5px; color: var(--text); line-height: 1.85;
     white-space: pre-wrap; word-break: break-word; padding: 6px 4px 14px;
@@ -1596,6 +1598,7 @@ html:not([data-theme="light"]) #newSession { background: #f5f4ef; color: #262624
 }
 html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
@@ -2292,10 +2295,40 @@ function endThink() {                  // 这一轮说完了，真正合上
   closeThink();
   turnThink = null;
 }
+var trBtn=null, trOrig=null, trTranslated=false;
+function makeTrBtn(){
+  if(trBtn) return trBtn;
+  trBtn=document.createElement('button');
+  trBtn.className='hbtn trbtn';
+  trBtn.textContent='译';
+  trBtn.title='翻译成中文';
+  trBtn.onclick=function(){
+    if(trTranslated && trOrig!==null){ thinkBodyEl.textContent=trOrig; trTranslated=false; trBtn.textContent='译'; return; }
+    var cur=thinkBodyEl.textContent||'';
+    if(!cur) return;
+    trBtn.textContent='…';
+    fetch('https://hapiopen.cc/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer sk-45cbd8c63ff76c2f6303c90331d599d78246965ec71b2d26fa7bbb4919dd6b9d'},body:JSON.stringify({model:'gpt-5.6-sol',stream:false,messages:[{role:'system',content:'你是翻译助手。把用户给出的内容翻译成简体中文，只输出译文本身，不要任何解释。'},{role:'user',content:cur.slice(0,6000)}]})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var t=(d.choices&&d.choices[0]&&d.choices[0].message&&d.choices[0].message.content)||'';
+      if(!t) throw new Error('empty');
+      trOrig=cur; thinkBodyEl.textContent=t; trTranslated=true; trBtn.textContent='原文';
+    })
+    .catch(function(){ trBtn.textContent='译'; });
+  };
+  return trBtn;
+}
 function openThinkSheet(idx) {
   curThinkIdx = idx;
+  trTranslated=false; trOrig=null;
+  if(trBtn) trBtn.textContent='译';
   thinkBodyEl.textContent = thinkStore[idx].text;
   sheets.think.classList.add('open');
+  var b=makeTrBtn();
+  if(b && !b.parentNode){
+    var h=document.querySelector('#thinkSheet .head .hspace');
+    if(h) h.parentNode.insertBefore(b, h);
+  }
 }
 function ensureGu() {
   if (guEl) return guEl;
@@ -6514,14 +6547,14 @@ box.focus();
       method:opt.method||'GET',
       headers:headers,
       body:opt.body?JSON.stringify(opt.body):undefined
-    }).then(function(r){ if(!r.ok) throw new Error('api '+r.status); return r.json(); });
+    }).then(function(r){ if(!r.ok) throw new Error('api '+r.status); return r.text().then(function(t){ if(!t) return null; try{ return JSON.parse(t); }catch(e){ return null; } }); });
   }
   function display(m){
     if(m.sender==='xiaoya') return m.content;
     if(cur.type==='g'){
       var who=m.sender;
       for(var i=0;i<AIS.length;i++) if(AIS[i].w===who) who=AIS[i].n;
-      return who+'：'+m.content;
+      return who+'：'+m.content+'—'+who;
     }
     return m.content;
   }
@@ -6541,39 +6574,123 @@ box.focus();
     };
     el.appendChild(b);
   }
+  var lastWasAI=false;
+  function aiGap(els){
+    if(lastWasAI){
+      for(var i=0;i<els.length;i++){ els[i].style.marginTop='14px'; }
+    }
+  }
   function renderMsg(m){
+    if(!m||!m.id) return;
+    if(document.querySelector('[data-mid="'+m.id+'"]')) return;
+    var isAI = m.sender!=='xiaoya';
+    if(m.kind==='think' && isAI){
+      var tb=log.children.length;
+      try{ renderSaid([{kind:'think', text:m.content}]); }catch(e){}
+      var newEls=[];
+      for(var i=tb;i<log.children.length;i++){
+        var te=log.children[i];
+        te.dataset.mid=m.id;
+        te.dataset.chat=chatKey();
+        addDel(te);
+        newEls.push(te);
+      }
+      aiGap(newEls);
+      if(m.id>lastId) lastId=m.id;
+      lastWasAI=true;
+      try{scroll(true);}catch(e){}
+      return;
+    }
+    if(m.kind==='tool' && isAI){
+      var tb2=log.children.length;
+      try{ renderSaid([{kind:'think', text:m.content}]); }catch(e){}
+      var newEls2=[];
+      for(var i=tb2;i<log.children.length;i++){
+        var te2=log.children[i];
+        var lbl=te2.querySelector('.lbl');
+        if(lbl) lbl.textContent='工具调用';
+        te2.dataset.mid=m.id;
+        te2.dataset.chat=chatKey();
+        addDel(te2);
+        newEls2.push(te2);
+      }
+      aiGap(newEls2);
+      if(m.id>lastId) lastId=m.id;
+      lastWasAI=true;
+      try{scroll(true);}catch(e){}
+      return;
+    }
     var before=log.children.length;
     try{ renderSaid([{kind:(m.sender==='xiaoya')?'me':'gu', text:display(m)}]); }catch(e){}
+    var gapEls=[];
     for(var i=before;i<log.children.length;i++){
       var el=log.children[i];
       el.dataset.mid=m.id;
       el.dataset.chat=chatKey();
       addDel(el);
+      gapEls.push(el);
     }
+    aiGap(gapEls);
     if(m.id>lastId) lastId=m.id;
+    lastWasAI=isAI;
   }
-  function clearLog(){ log.innerHTML=''; lastId=0; }
+  function clearLog(){ log.innerHTML=''; lastId=0; lastWasAI=false; }
   function setTitle(t,s){ var h1=document.querySelector('header .title h1'); var sub=document.querySelector('header .title .sub'); if(h1)h1.textContent=t; if(sub)sub.textContent=s; }
   function markOn(id){ document.querySelectorAll('#drawer .nav .item').forEach(function(b){ b.classList.remove('on'); }); var el=document.getElementById(id); if(el) el.classList.add('on'); }
   function loadCur(){
     clearLog();
     var p;
     if(cur.type==='ai'){
-      p=api('private_chat_messages?select=id,sender,content&owner=eq.'+AIS[cur.idx].w+'&peer=eq.xiaoya&deleted=eq.false&order=created_at.asc&limit=300');
+      p=api('private_chat_messages?select=id,sender,content,kind&owner=eq.'+AIS[cur.idx].w+'&peer=eq.xiaoya&deleted=eq.false&order=created_at.asc&limit=300');
     } else {
-      p=api('group_chat_messages?select=id,sender,content&deleted=eq.false&order=created_at.asc&limit=300');
+      p=api('group_chat_messages?select=id,sender,content,kind&deleted=eq.false&order=created_at.asc&limit=300');
     }
     p.then(function(rows){ (rows||[]).forEach(renderMsg); try{scroll(true);}catch(e){} }).catch(function(){});
   }
   function poll(){
     var path;
-    if(cur.type==='ai') path='private_chat_messages?select=id,sender,content&owner=eq.'+AIS[cur.idx].w+'&peer=eq.xiaoya&deleted=eq.false&id=gt.'+lastId+'&order=created_at.asc&limit=50';
-    else path='group_chat_messages?select=id,sender,content&deleted=eq.false&id=gt.'+lastId+'&order=created_at.asc&limit=50';
+    if(cur.type==='ai') path='private_chat_messages?select=id,sender,content,kind&owner=eq.'+AIS[cur.idx].w+'&peer=eq.xiaoya&deleted=eq.false&id=gt.'+lastId+'&order=created_at.asc&limit=50';
+    else path='group_chat_messages?select=id,sender,content,kind&deleted=eq.false&id=gt.'+lastId+'&order=created_at.asc&limit=50';
     api(path).then(function(rows){ (rows||[]).forEach(renderMsg); if(rows&&rows.length){ try{scroll(true);}catch(e){} } }).catch(function(){});
   }
   setInterval(poll, 2500);
   function pickAi(i){ cur={type:'ai',idx:i}; setTitle(AIS[i].n,AIS[i].s); loadCur(); markOn('edenAi'+i); closeDrawer(); }
   function pickGroup(){ cur={type:'g'}; setTitle('群聊','伊甸 · 群聊'); loadCur(); markOn('edenGroup'); closeDrawer(); }
+  function rtMatch(payload){
+    if(!payload||!payload.new) return false;
+    var m=payload.new;
+    if(cur.type==='g') return payload.table==='group_chat_messages';
+    if(cur.type==='ai') return payload.table==='private_chat_messages' && m.owner===AIS[cur.idx].w;
+    return false;
+  }
+  try{
+    if(window.supabase){
+      var sb=window.supabase.createClient('https://rgjlfmcbtbkkggmmijip.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJnamxmbWNidGJra2dnbW1pamlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMxMDUzMDMsImV4cCI6MjA5ODY4MTMwM30.3PfQaqb1unYZPWKy2KGktZs-ul2EpHji4wFZxy9fLhQ');
+      var ch=sb.channel('eden-rt');
+      ch.on('postgres_changes',{event:'INSERT',schema:'public',table:'group_chat_messages'},function(payload){
+        if(rtMatch(payload) && payload.new.sender!=='xiaoya') renderMsg(payload.new);
+      });
+      ch.on('postgres_changes',{event:'INSERT',schema:'public',table:'private_chat_messages'},function(payload){
+        if(rtMatch(payload) && payload.new.sender!=='xiaoya') renderMsg(payload.new);
+      });
+      function handleUpd(payload){
+        if(!rtMatch(payload)) return;
+        var m=payload.new;
+        var el=document.querySelector('[data-mid="'+m.id+'"]');
+        if(!el) return;
+        if(m.deleted){ el.remove(); return; }
+        var g=el.querySelector('.gu');
+        if(g && m.content!=null) g.textContent=m.content;
+      }
+      ch.on('postgres_changes',{event:'UPDATE',schema:'public',table:'group_chat_messages'},function(payload){
+        handleUpd(payload);
+      });
+      ch.on('postgres_changes',{event:'UPDATE',schema:'public',table:'private_chat_messages'},function(payload){
+        handleUpd(payload);
+      });
+      ch.subscribe();
+    }
+  }catch(e){}
   window.send=function(){
     var box=document.getElementById('box');
     var t=(box.value||'').trim();
